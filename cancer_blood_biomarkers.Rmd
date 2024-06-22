@@ -1,0 +1,596 @@
+---
+title: "cancer_blood_biomarkers"
+author: "Hansen Han"
+date: "2024-06-18"
+output: html_document
+---
+
+# Cancer Blood Biomarker Discovery
+Analysis to identify diagnostic biomarkers of cancer via meta-analysis of gene expression.
+
+## Load Libraries
+```{r messages=FALSE errors=FALSE}
+library(MetaIntegrator)
+library(tidyverse)
+library(magrittr)
+library(ggpubr)
+library(biomaRt)
+```
+
+## Prepare Data for Analysis
+
+### Download From GEO
+
+Download Discovery & Validation Study Data
+```{r}
+study_ids <- c(
+  "GSE198048",
+  "GSE138118",
+  "GSE136651",
+  "GSE74629",
+  "GSE125158",
+  "GSE47861",
+  "GSE20189",
+  "GSE16443",
+  "GSE39345",
+  "GSE120691",
+  "GSE164191",
+  "GSE49515",
+  "GSE27562",
+  "GSE10715"
+)
+```
+
+```{r}
+# ran into an issue here downloading data with getGEOData(), fixed by installing GEOquery.  
+blood_biomarker_data_raw <- getGEOData(gseVector = study_ids, destdir="/Users/hansenhan/cancer_blood_biomarkers")
+blood_biomarker_data_raw %>% save(file = "blood_biomarker_data_raw.RData")
+```
+
+Identify studies missing expression data
+```{r}
+studies_missing_expr_data <- c()
+for (study in blood_biomarker_data_raw$originalData) {
+  if (study$exp_comment == "Expression data is missing") {
+    studies_missing_expr_data <- c(studies_missing_expr_data, study$name)
+  }
+}
+
+studies_missing_expr_data
+```
+
+### Load Manual Data
+
+#### GSE198048
+
+```{r}
+GSE198048_data <- read_tsv("GSE198048_Normalized_mRNA_matrix.txt")
+GSE198048_data
+```
+The data is loaded incorrectly, with the columns needing to be shifted to the right. 
+
+```{r}
+sample_ids <- colnames(GSE198048_data)
+sample_ids
+```
+```{r}
+# set probe ids to index
+GSE198048_data %<>% column_to_rownames(var = "100")
+GSE198048_data
+```
+
+
+Last column is loaded incorrectly, ie: "0.795771355682911\t3.45972844016865", need to split it out and add on a new last column
+
+```{r}
+corrected_last_column_data <- c()
+corrected_new_last_column_data <- c()
+
+for (entry in GSE198048_data$`99`) {
+  split_data <- strsplit(entry, "\t")
+  corrected_last_column_data <- c(corrected_last_column_data, split_data[[1]][1])
+  corrected_new_last_column_data <- c(corrected_new_last_column_data, split_data[[1]][2])
+}
+
+GSE198048_data$`99` <- corrected_last_column_data
+GSE198048_data$newcolumn <- corrected_new_last_column_data
+GSE198048_data
+```
+
+Rename the data with the correct sample names
+```{r}
+colnames(GSE198048_data) <- sample_ids
+GSE198048_data
+```
+
+Assign GEO accession numbers to expression samples
+```{r}
+
+new_sample_ids <- c()
+
+# rotate so we can pair rename samples easily
+expr_data <- as.data.frame(t(GSE198048_data)) %>% rownames_to_column(var = "patient_id")
+
+
+# find the matching GSM sample id for each patient
+for (patient_id_expr in expr_data$patient_id) {
+  for (title_str in blood_biomarker_data_raw$originalData$GSE198048$pheno %>% pull(title)) {
+    patient_id_meta <- strsplit(title_str, "_")[[1]][2]
+    if (patient_id_expr == patient_id_meta) {
+      gsm_id <- blood_biomarker_data_raw$originalData$GSE198048$pheno %>% filter(title == title_str) %>% pull(geo_accession)
+      new_sample_ids <- c(new_sample_ids, gsm_id)
+    }
+  }
+    
+}
+
+# save them
+expr_data$patient_id <- new_sample_ids
+
+# rotate it back
+expr_data %<>% column_to_rownames(var = "patient_id") %>% t() %>% as.data.frame()
+expr_data
+```
+Save to MetaIntegrator object
+```{r}
+blood_biomarker_data_raw$originalData$GSE198048$expr <- expr_data
+blood_biomarker_data_raw$originalData$GSE198048$exp_comment <- "Expression data manually loaded"
+```
+
+```{r}
+blood_biomarker_data_raw$originalData$GSE198048$pheno
+```
+
+
+#### GSE136651 (Need to Download FASTQs)
+We have GPL18573 - Illumina NextSeq 5000
+We also have GPL24106 - MinION (ignore)
+
+Remove platform-specific study data, make it so that it is only Illumina platform....there are only 2 nanopore samples
+```{r}
+blood_biomarker_data_raw$originalData$GSE136651 <- blood_biomarker_data_raw$originalData$GSE136651_GPL18573
+blood_biomarker_data_raw$originalData$GSE136651_GPL18573 <- NULL
+blood_biomarker_data_raw$originalData$GSE136651_GPL24106 <- NULL
+```
+
+```{r}
+blood_biomarker_data_raw$originalData$GSE136651$exp_comment
+```
+
+Load RNAseq counts
+
+what the hell is this.....
+```{r}
+GSE136651_expr <- read_csv("GSE136651_panc_normal_normalized_counts_20230703.csv.gz")
+GSE136651_expr
+```
+```{r}
+GSE136651_meta <- read_csv("GSE136651_panc_normal_scaled_metaData_2023-05-18.csv.gz")
+GSE136651_meta
+```
+
+```{r}
+blood_biomarker_data_raw$originalData$GSE136651 <- NULL
+```
+
+
+
+#### GSE120691 (Need to Download FASTQs)
+
+```{r}
+# delete for now
+blood_biomarker_data_raw$originalData$GSE120691 <- NULL
+```
+
+
+
+### Label Study Metadata
+Here we'll use 1 to denote cancer and 0 to denote healthy control
+
+
+#### GSE198048
+```{r}
+pheno_data <- blood_biomarker_data_raw$originalData$GSE198048$pheno
+for (sample_id in pheno_data$geo_accession) {
+  if (pheno_data %>% filter(geo_accession == sample_id) %>% pull(`histology:ch1`) == "NA") {
+    # if it is NA, it is false positive and a healthy control
+    label_value <- 0
+  } else {
+    label_value <- 1
+  }
+  
+  # assign the new label value
+  blood_biomarker_data_raw$originalData$GSE198048$class[sample_id] <- label_value
+}
+
+#Get a count of how many healthy and diseased samples there are
+table(blood_biomarker_data_raw$originalData$GSE198048$class)
+```
+
+
+#### GSE138118
+```{r}
+pheno_data <- blood_biomarker_data_raw$originalData$GSE138118$pheno
+for (sample_id in pheno_data$geo_accession) {
+  if (pheno_data %>% filter(geo_accession == sample_id) %>% pull(`description`) == "Health volunteer Blood") {
+    # if it is NA, it is false positive and a healthy control
+    label_value <- 0
+  } else {
+    label_value <- 1
+  }
+  
+  # assign the new label value
+  blood_biomarker_data_raw$originalData$GSE138118$class[sample_id] <- label_value
+}
+
+#Get a count of how many healthy and diseased samples there are
+table(blood_biomarker_data_raw$originalData$GSE138118$class)
+```
+
+
+#### GSE74629
+```{r}
+pheno_data <- blood_biomarker_data_raw$originalData$GSE74629$pheno
+for (sample_id in pheno_data$geo_accession) {
+  if (pheno_data %>% filter(geo_accession == sample_id) %>% pull(`diagnosis:ch1`) == "healthy") {
+    # if it is NA, it is false positive and a healthy control
+    label_value <- 0
+  } else {
+    label_value <- 1
+  }
+  
+  # assign the new label value
+  blood_biomarker_data_raw$originalData$GSE74629$class[sample_id] <- label_value
+}
+
+#Get a count of how many healthy and diseased samples there are
+table(blood_biomarker_data_raw$originalData$GSE74629$class)
+```
+
+#### GSE125158
+```{r}
+pheno_data <- blood_biomarker_data_raw$originalData$GSE125158$pheno
+for (sample_id in pheno_data$geo_accession) {
+  if (pheno_data %>% filter(geo_accession == sample_id) %>% pull(`diagnosis:ch1`) == "healthy") {
+    # if it is NA, it is false positive and a healthy control
+    label_value <- 0
+  } else {
+    label_value <- 1
+  }
+  
+  # assign the new label value
+  blood_biomarker_data_raw$originalData$GSE125158$class[sample_id] <- label_value
+}
+
+#Get a count of how many healthy and diseased samples there are
+table(blood_biomarker_data_raw$originalData$GSE125158$class)
+```
+
+
+#### GSE47861
+```{r}
+pheno_data <- blood_biomarker_data_raw$originalData$GSE47861$pheno
+for (sample_id in pheno_data$geo_accession) {
+  if (pheno_data %>% filter(geo_accession == sample_id) %>% pull(`developed_breast_cancer:ch1`) == "no") {
+    # if it is NA, it is false positive and a healthy control
+    label_value <- 0
+  } else {
+    label_value <- 1
+  }
+  
+  # assign the new label value
+  blood_biomarker_data_raw$originalData$GSE47861$class[sample_id] <- label_value
+}
+
+#Get a count of how many healthy and diseased samples there are
+table(blood_biomarker_data_raw$originalData$GSE47861$class)
+```
+
+#### GSE20189
+Case excluded should be dropped.
+```{r}
+pheno_data <- blood_biomarker_data_raw$originalData$GSE20189$pheno
+for (sample_id in pheno_data$geo_accession) {
+  variable_to_examine <- pheno_data %>% filter(geo_accession == sample_id) %>% pull(`description`)
+  if (variable_to_examine == "Control") {
+    label_value <- 0
+  } else if (variable_to_examine == "Case") {
+    label_value <- 1
+  } else {
+    label_value <- 2
+  }
+  
+  # assign the new label value
+  blood_biomarker_data_raw$originalData$GSE20189$class[sample_id] <- label_value
+}
+
+# remove case excluded from metadata
+blood_biomarker_data_raw$originalData$GSE20189$pheno %<>% filter(description != "Case Excluded")
+
+# remove from labels
+blood_biomarker_data_raw$originalData$GSE20189$class <- blood_biomarker_data_raw$originalData$GSE20189$class[blood_biomarker_data_raw$originalData$GSE20189$class != 2]
+
+#Get a count of how many healthy and diseased samples there are
+table(blood_biomarker_data_raw$originalData$GSE20189$class)
+```
+
+#### GSE16443
+```{r}
+pheno_data <- blood_biomarker_data_raw$originalData$GSE16443$pheno
+for (sample_id in pheno_data$geo_accession) {
+  if (pheno_data %>% filter(geo_accession == sample_id) %>% pull(`status:ch1`) == "Healthy") {
+    # if it is NA, it is false positive and a healthy control
+    label_value <- 0
+  } else {
+    label_value <- 1
+  }
+  
+  # assign the new label value
+  blood_biomarker_data_raw$originalData$GSE16443$class[sample_id] <- label_value
+}
+
+#Get a count of how many healthy and diseased samples there are
+table(blood_biomarker_data_raw$originalData$GSE16443$class)
+```
+
+#### GSE39345
+```{r}
+pheno_data <- blood_biomarker_data_raw$originalData$GSE39345$pheno
+for (sample_id in pheno_data$geo_accession) {
+  variable_to_examine <- pheno_data %>% filter(geo_accession == sample_id) %>% pull(`sample type:ch1`)
+  if (variable_to_examine == "healthy") {
+    label_value <- 0
+  } else if (variable_to_examine == "before chemotherapy") {
+    label_value <- 1
+  } else {
+    label_value <- 2
+  }
+  
+  # assign the new label value
+  blood_biomarker_data_raw$originalData$GSE39345$class[sample_id] <- label_value
+}
+
+# remove case excluded from metadata
+blood_biomarker_data_raw$originalData$GSE39345$pheno %<>% filter(`sample type:ch1` != "after chemotherapy")
+
+# remove from labels
+blood_biomarker_data_raw$originalData$GSE39345$class <- blood_biomarker_data_raw$originalData$GSE39345$class[blood_biomarker_data_raw$originalData$GSE39345$class != 2]
+
+#Get a count of how many healthy and diseased samples there are
+table(blood_biomarker_data_raw$originalData$GSE39345$class)
+```
+
+#### GSE164191
+```{r}
+pheno_data <- blood_biomarker_data_raw$originalData$GSE164191$pheno
+for (sample_id in pheno_data$geo_accession) {
+  if (pheno_data %>% filter(geo_accession == sample_id) %>% pull(`disease status:ch1`) == "normal") {
+    # if it is NA, it is false positive and a healthy control
+    label_value <- 0
+  } else {
+    label_value <- 1
+  }
+  
+  # assign the new label value
+  blood_biomarker_data_raw$originalData$GSE164191$class[sample_id] <- label_value
+}
+
+#Get a count of how many healthy and diseased samples there are
+table(blood_biomarker_data_raw$originalData$GSE164191$class)
+```
+
+#### GSE49515
+```{r}
+pheno_data <- blood_biomarker_data_raw$originalData$GSE49515$pheno
+for (sample_id in pheno_data$geo_accession) {
+  if (pheno_data %>% filter(geo_accession == sample_id) %>% pull(`disease status:ch1`) == "healthy") {
+    # if it is NA, it is false positive and a healthy control
+    label_value <- 0
+  } else {
+    label_value <- 1
+  }
+  
+  # assign the new label value
+  blood_biomarker_data_raw$originalData$GSE49515$class[sample_id] <- label_value
+}
+
+#Get a count of how many healthy and diseased samples there are
+table(blood_biomarker_data_raw$originalData$GSE49515$class)
+```
+
+
+
+
+#### GSE27562
+```{r}
+pheno_data <- blood_biomarker_data_raw$originalData$GSE27562$pheno
+for (sample_id in pheno_data$geo_accession) {
+  variable_to_examine <- pheno_data %>% filter(geo_accession == sample_id) %>% pull(`phenotype:ch1`)
+  if (variable_to_examine == "Normal") {
+    label_value <- 0
+  } else if (variable_to_examine %in% c("Malignant", "Ectopic", "Pre-Surgery (aka Malignant)")) {
+    label_value <- 1
+  } else {
+    # remove Post-Surgery" and "Bennign" samples
+    label_value <- 2
+  }
+  
+  # remove non PBMCs
+  variable_to_examine <- pheno_data %>% filter(geo_accession == sample_id) %>% pull(`tissue:ch1`)
+  if (variable_to_examine == "peripheral blood leukocytes") {
+    label_value <- 2
+  }
+  
+  
+  
+
+  # assign the new label value
+  blood_biomarker_data_raw$originalData$GSE27562$class[sample_id] <- label_value
+}
+
+# remove filtered smaples from labels
+blood_biomarker_data_raw$originalData$GSE27562$class <- blood_biomarker_data_raw$originalData$GSE27562$class[blood_biomarker_data_raw$originalData$GSE27562$class != 2]
+
+# remove case excluded from metadata
+blood_biomarker_data_raw$originalData$GSE27562$pheno %<>% filter(geo_accession %in% names(blood_biomarker_data_raw$originalData$GSE27562$class))
+
+#Get a count of how many healthy and diseased samples there are
+table(blood_biomarker_data_raw$originalData$GSE27562$class)
+```
+
+
+#### GSE10715
+```{r}
+pheno_data <- blood_biomarker_data_raw$originalData$GSE10715$pheno
+for (sample_id in pheno_data$geo_accession) {
+  if (pheno_data %>% filter(geo_accession == sample_id) %>% pull(`Blood:ch1`) == "Normal") {
+    # if it is NA, it is false positive and a healthy control
+    label_value <- 0
+  } else {
+    label_value <- 1
+  }
+  
+  # assign the new label value
+  blood_biomarker_data_raw$originalData$GSE10715$class[sample_id] <- label_value
+}
+
+#Get a count of how many healthy and diseased samples there are
+table(blood_biomarker_data_raw$originalData$GSE10715$class)
+```
+
+
+### Filter Expression Data
+In previous steps, some samples may have been removed from the metadata, run a check in bulk across all studies that will remove all samples from expression data that dont have a corresponding sample in the metadata.
+
+```{r}
+#for (study in blood_biomarker_data_raw$originalData) {
+#  samples_in_metadata <- study$pheno %>% pull(geo_accession)
+  
+  # rotate, the data, filter out samples that aren't
+#  expr_data <- as.data.frame(t(study$expr))
+#  expr_data %<>% rownames_to_column(var="sample_id") %>% filter(sample_id %in% samples_in_metadata) %>% column_to_rownames(var="sample_id")
+#  expr_data <- as.data.frame(t(expr_data))
+#  study$expr <- as.matrix(expr_data)
+#}
+```
+
+### Convert Expression to Gene Names
+- Use conversion tables downloaded from GEO in biomarkers/platform_conversion_tables/ and bioMart to convert gene names
+- Take the mean of duplicate gene names 
+
+```{r}
+blood_biomarker_data_raw$originalData$GSE47861$expr
+```
+
+```{r}
+library(biomaRt)
+ensembl <- useEnsembl(biomart = "ensembl", 
+                   dataset = "hsapiens_gene_ensembl", 
+                   mirror = "useast")
+attributes = listAttributes(ensembl)
+attributes[1:5,]
+```
+```{r}
+ensembl_entrezgene_ensembl_gene_map <- getBM(attributes = c('affy_hg_u133_plus_2', 'entrezgene_id', 'ensembl_gene_id', 'external_gene_name'), mart = ensembl)
+ensembl_entrezgene_ensembl_gene_map
+```
+
+#### GSE198048
+```{r}
+expr_data <- blood_biomarker_data_raw$originalData$GSE198048$expr
+expr_data %>% rownames_to_column(var="ensembl_gene_id") %>% left_join(ensembl_entrezgene_ensembl_gene_map %>% dplyr::select(ensembl_gene_id, external_gene_name), by=c("ensembl_gene_id"="ensembl_gene_id")) %>% filter(!is.na(external_gene_name)) %>% dplyr::select(-ensembl_gene_id) %>%
+  mutate(across(-external_gene_name, as.numeric)) %>% group_by(external_gene_name) %>% summarise(across(where(is.numeric), mean, na.rm = TRUE)) %>% ungroup() %>% column_to_rownames(var="external_gene_name") 
+```
+
+
+#### GSE138118
+```{r}
+blood_biomarker_data_raw$originalData$GSE138118$expr
+```
+
+#### GSE74629
+```{r}
+blood_biomarker_data_raw$originalData$GSE74629$expr
+```
+
+#### GSE125158
+```{r}
+blood_biomarker_data_raw$originalData$GSE125158$expr
+```
+
+#### GSE47861
+```{r}
+blood_biomarker_data_raw$originalData$GSE47861$expr
+```
+
+#### GSE20189
+```{r}
+
+study <- blood_biomarker_data_raw$originalData$GSE20189
+samples_in_metadata <- study$pheno %>% pull(geo_accession)
+expr_data <- as.data.frame(study$expr)
+
+expr_data %<>% rownames_to_column(var="affy_hg_u133_plus_2") %>% left_join(ensembl_entrezgene_ensembl_gene_map %>% dplyr::select(affy_hg_u133_plus_2, external_gene_name), by=c("affy_hg_u133_plus_2"="affy_hg_u133_plus_2")) %>% filter(!is.na(external_gene_name)) %>% dplyr::select(-affy_hg_u133_plus_2) %>%
+  mutate(across(-external_gene_name, as.numeric)) %>% group_by(external_gene_name) %>% summarise(across(where(is.numeric), mean, na.rm = TRUE)) %>% ungroup() %>% column_to_rownames(var="external_gene_name") 
+
+# remove NA first row
+expr_data %<>% slice(-1)
+
+# remove samples not in the metadata
+
+# get the gene names
+gene_names <- rownames(expr_data)
+
+# rotate, the data, filter out samples that aren't
+expr_data <- as.data.frame(t(expr_data))
+expr_data %<>% rownames_to_column(var="sample_id") %>% filter(sample_id %in% samples_in_metadata) %>% column_to_rownames(var="sample_id")
+expr_data <- as.data.frame(t(expr_data))
+
+# save to the dataset
+blood_biomarker_data_raw$originalData$GSE20189$expr <- expr_data
+blood_biomarker_data_raw$originalData$GSE20189$keys <- gene_names
+```
+
+```{r}
+blood_biomarker_data_raw$originalData$GSE20189$expr
+```
+
+There is a discrepancy between pheno and class samples 
+```{r}
+checkDataObject(blood_biomarker_data_raw$originalData$GSE20189, "Dataset")
+```
+
+```{r}
+as.data.frame(blood_biomarker_data_raw$originalData$GSE20189$expr)
+```
+
+
+```{r}
+checkDataObject(blood_biomarker_data_raw$originalData$GSE20189, "Dataset")
+```
+
+
+```{r}
+
+```
+
+
+## Calculations
+
+```{r}
+for (study in blood_biomarker_data_raw$originalData) {
+    print(study$platform)
+}
+```
+
+
+```{r}
+checkDataObject(blood_biomarker_data_raw$originalData$GSE47861, "Dataset")
+```
+
+```{r}
+checkDataObject(blood_biomarker_data_raw, "Meta", "Pre-Analysis")
+```
+
+
+
