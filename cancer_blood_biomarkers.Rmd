@@ -142,7 +142,7 @@ blood_biomarker_data_raw$originalData$GSE198048$pheno
 ```
 
 
-#### GSE136651 (Need to Download FASTQs)
+#### GSE136651
 We have GPL18573 - Illumina NextSeq 5000
 We also have GPL24106 - MinION (ignore)
 
@@ -153,29 +153,34 @@ blood_biomarker_data_raw$originalData$GSE136651_GPL18573 <- NULL
 blood_biomarker_data_raw$originalData$GSE136651_GPL24106 <- NULL
 ```
 
-```{r}
-blood_biomarker_data_raw$originalData$GSE136651$exp_comment
-```
+Load TPMs
+Originally tried to load "GSE136651_norm_counts_TPM_GRCh38.p13_NCBI.tsv.gz" from NCBI, but it only has 16 samples when there should be around 30+ (must have gotten snagged on the nanostrining samples embedded in there...)
 
-Load RNAseq counts
+Instead, given the BioProject ID (PRJNA562932), I used my ```ena_rnaseq_pipeline pipeline``` (https://github.com/hansenrhan/ena_rnaseq_quantification) to download the FASTQs, quantify them with Salmon and combine them into a single csv.
 
-what the hell is this.....
+
 ```{r}
-GSE136651_expr <- read_csv("GSE136651_panc_normal_normalized_counts_20230703.csv.gz")
+GSE136651_expr <- read_csv("PRJNA562932_TPMs.csv")
+GSE136651_expr$...1 <- NULL
 GSE136651_expr
 ```
-```{r}
-GSE136651_meta <- read_csv("GSE136651_panc_normal_scaled_metaData_2023-05-18.csv.gz")
-GSE136651_meta
-```
 
 ```{r}
-blood_biomarker_data_raw$originalData$GSE136651 <- NULL
+blood_biomarker_data_raw$originalData$GSE136651$expr <- GSE136651_expr
+blood_biomarker_data_raw$originalData$GSE136651$exp_comment <- "Expression data manually loaded"
 ```
 
 
 
-#### GSE120691 (Need to Download FASTQs)
+#### GSE120691
+
+Decided to also use my rnaseq quant pipeline instead of the file from GEO (GSE120691_norm_counts_TPM_GRCh38.p13_NCBI.tsv.gz)
+
+```{r}
+GSE120691_expr <- read_tsv("LOAD FILE")
+GSE120691_expr
+```
+
 
 ```{r}
 # delete for now
@@ -304,11 +309,12 @@ for (sample_id in pheno_data$geo_accession) {
   blood_biomarker_data_raw$originalData$GSE20189$class[sample_id] <- label_value
 }
 
-# remove case excluded from metadata
-blood_biomarker_data_raw$originalData$GSE20189$pheno %<>% filter(description != "Case Excluded")
-
 # remove from labels
 blood_biomarker_data_raw$originalData$GSE20189$class <- blood_biomarker_data_raw$originalData$GSE20189$class[blood_biomarker_data_raw$originalData$GSE20189$class != 2]
+
+# remove samples from metadata 
+blood_biomarker_data_raw$originalData$GSE20189$pheno %<>% filter(geo_accession %in% names(blood_biomarker_data_raw$originalData$GSE20189$class))
+
 
 #Get a count of how many healthy and diseased samples there are
 table(blood_biomarker_data_raw$originalData$GSE20189$class)
@@ -523,7 +529,7 @@ blood_biomarker_data_raw$originalData$GSE125158$expr
 blood_biomarker_data_raw$originalData$GSE47861$expr
 ```
 
-#### GSE20189
+#### GSE20189 (TODO - switch to GPL571 instead of GPL570 for probe - gene matching, might get more genes)
 ```{r}
 
 study <- blood_biomarker_data_raw$originalData$GSE20189
@@ -547,21 +553,12 @@ expr_data %<>% rownames_to_column(var="sample_id") %>% filter(sample_id %in% sam
 expr_data <- as.data.frame(t(expr_data))
 
 # save to the dataset
-blood_biomarker_data_raw$originalData$GSE20189$expr <- expr_data
+blood_biomarker_data_raw$originalData$GSE20189$expr <- as.matrix(expr_data)
 blood_biomarker_data_raw$originalData$GSE20189$keys <- gene_names
 ```
 
 ```{r}
-blood_biomarker_data_raw$originalData$GSE20189$expr
-```
-
-There is a discrepancy between pheno and class samples 
-```{r}
-checkDataObject(blood_biomarker_data_raw$originalData$GSE20189, "Dataset")
-```
-
-```{r}
-as.data.frame(blood_biomarker_data_raw$originalData$GSE20189$expr)
+blood_biomarker_data_raw$originalData$GSE20189$platform
 ```
 
 
@@ -569,9 +566,41 @@ as.data.frame(blood_biomarker_data_raw$originalData$GSE20189$expr)
 checkDataObject(blood_biomarker_data_raw$originalData$GSE20189, "Dataset")
 ```
 
-
+#### GSE16443
 ```{r}
+blood_biomarker_data_raw$originalData$GSE16443$expr
+```
 
+#### GSE39345
+```{r}
+blood_biomarker_data_raw$originalData$GSE39345$expr
+```
+
+#### GSE164191 (Ready)
+```{r}
+study <- blood_biomarker_data_raw$originalData$GSE164191
+samples_in_metadata <- study$pheno %>% pull(geo_accession)
+expr_data <- as.data.frame(study$expr)
+
+expr_data %<>% rownames_to_column(var="affy_hg_u133_plus_2") %>% left_join(ensembl_entrezgene_ensembl_gene_map %>% dplyr::select(affy_hg_u133_plus_2, external_gene_name), by=c("affy_hg_u133_plus_2"="affy_hg_u133_plus_2")) %>% filter(!is.na(external_gene_name)) %>% dplyr::select(-affy_hg_u133_plus_2) %>%
+  mutate(across(-external_gene_name, as.numeric)) %>% group_by(external_gene_name) %>% summarise(across(where(is.numeric), mean, na.rm = TRUE)) %>% ungroup() %>% column_to_rownames(var="external_gene_name") 
+
+# remove NA first row
+expr_data %<>% slice(-1)
+
+# remove samples not in the metadata
+
+# get the gene names
+gene_names <- rownames(expr_data)
+
+# rotate, the data, filter out samples that aren't
+expr_data <- as.data.frame(t(expr_data))
+expr_data %<>% rownames_to_column(var="sample_id") %>% filter(sample_id %in% samples_in_metadata) %>% column_to_rownames(var="sample_id")
+expr_data <- as.data.frame(t(expr_data))
+
+# save to the dataset
+blood_biomarker_data_raw$originalData$GSE164191$expr <- as.matrix(expr_data)
+blood_biomarker_data_raw$originalData$GSE164191$keys <- gene_names
 ```
 
 
