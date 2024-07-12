@@ -1,0 +1,111 @@
+---
+title: "cancer_blood_biomarkers"
+author: "Hansen Han"
+date: "2024-06-18"
+output: html_document
+---
+
+# Cancer Blood Biomarker Discovery (Analysis)
+Analysis to identify diagnostic biomarkers of cancer via meta-analysis of gene expression studies.
+
+## Load Libraries
+```{r messages=FALSE errors=FALSE}
+library(MetaIntegrator)
+library(tidyverse)
+library(magrittr)
+library(ggpubr)
+library(biomaRt)
+```
+
+## Load Processed Data
+```{r}
+load("processed_cancer_blood_datasets.Rdata")
+```
+
+
+## Split into Test & Train
+
+Split 
+```{r}
+# Set seed for reproducibility
+set.seed(123)
+
+study_ids <- c(
+  "GSE198048",
+  "GSE138118",
+  "GSE136651",
+  "GSE74629",
+  "GSE20189",
+  "GSE39345",
+  "GSE120691",
+  "GSE164191",
+  "GSE49515",
+  "GSE27562",
+  "GSE10715"
+)
+
+# Shuffle the list
+shuffled_ids <- sample(study_ids)
+
+# Split into train and test sets
+train_ids <- shuffled_ids[1:6]
+test_ids <- shuffled_ids[7:11]
+test_ids <- c(test_ids, "GSE16443") # add this one in there no matter what since it only has 6k probes
+
+# Print the results
+cat("Train IDs:\n")
+print(train_ids)
+cat("\nTest IDs:\n")
+print(test_ids)
+```
+
+Format datasets
+```{r}
+# remove train datasets from test data and vice versa
+test_data <- blood_biomarker_data_raw
+for (study_to_delete in train_ids) {
+  test_data$originalData[[study_to_delete]] <- NULL
+}
+
+train_data <- blood_biomarker_data_raw
+for (study_to_delete in test_ids) {
+  train_data$originalData[[study_to_delete]] <- NULL
+}
+
+```
+
+## Meta Analysis
+
+### Calculate Effect Sizes
+```{r}
+meta_results <- runMetaAnalysis(train_data, runLeaveOneOutAnalysis= TRUE, maxCores=Inf)
+```
+
+### Identify Gene Signature
+Here, we look for a gene signature with an effect size > 1, significance of =< 0.05
+```{r}
+meta_results <- filterGenes(meta_results, isLeaveOneOut = FALSE, effectSizeThresh = 1, FDRThresh = 0.05)
+```
+
+View gene signature
+```{r}
+meta_results$filterResults[[1]]
+```
+
+```{r}
+heatmapPlot(metaObject = meta_results, filterObject = meta_results$filterResults[[1]])
+```
+
+
+### Test Accuracy
+
+Performance on discovery data is varied but overall 0.87 AUC
+```{r}
+summaryROCPlot(metaObject = meta_results, filterObject = meta_results$filterResults[[1]], bootstrapReps = 100)
+```
+
+Performance on validation data breaks down with a summary AUC of 0.55
+```{r}
+summaryROCPlot(metaObject = test_data, filterObject = meta_results$filterResults[[1]], bootstrapReps = 100)
+```
+
