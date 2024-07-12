@@ -6,7 +6,7 @@ output: html_document
 ---
 
 # Cancer Blood Biomarker Discovery
-Analysis to identify diagnostic biomarkers of cancer via meta-analysis of gene expression.
+Analysis to identify diagnostic biomarkers of cancer via meta-analysis of gene expression studies.
 
 ## Load Libraries
 ```{r messages=FALSE errors=FALSE}
@@ -19,7 +19,7 @@ library(biomaRt)
 
 ## Prepare Data for Analysis
 
-### Download From GEO (Done)
+### Download From GEO 
 
 Download Discovery & Validation Study Data
 ```{r}
@@ -58,7 +58,7 @@ for (study in blood_biomarker_data_raw$originalData) {
 studies_missing_expr_data
 ```
 
-### Load Manual Data (Done)
+### Load Manual Data
 
 #### GSE198048
 (This is log2 format)
@@ -191,7 +191,7 @@ blood_biomarker_data_raw$originalData$GSE120691$pheno
 ```
 
 
-### Label Study Metadata (Done)
+### Label Study Metadata
 Here we'll use 1 to denote cancer and 0 to denote healthy control
 
 #### GSE136651
@@ -522,7 +522,7 @@ attributes[1:5,]
 ```
 
 ```{r}
-attributes %>% filter(grepl("agilent", name))
+attributes %>% filter(grepl("abi", name))
 ```
 
 ```{r}
@@ -542,7 +542,7 @@ ensembl_entrezgene_ensembl_gene_map <- getBM(attributes = c('affy_hg_u133_plus_2
 ensembl_entrezgene_ensembl_gene_map
 ```
 
-#### Check if any samples are missing metadata/expr
+#### Identify Metadata/Expression Mismatches
 ```{r}
 samples_in_metadata_not_in_expr <- function(dataset_object) {
   missing_samples <- c()
@@ -589,7 +589,7 @@ The samples you see above in GSE120691 need to be removed (they are neoplasmia n
 
 
 
-#### GSE136651 (Done)
+#### GSE136651
 ```{r}
 expr_data <- blood_biomarker_data_raw$originalData$GSE136651$expr
 expr_data$ensembl_transcript_id_version <- expr_data$Name
@@ -607,13 +607,13 @@ blood_biomarker_data_raw$originalData$GSE136651$keys <- rownames(expr_data)
 blood_biomarker_data_raw$originalData$GSE136651$key_comment <- "Keys manually loaded"
 
 # log transform the data since it is in TPM format 
-blood_biomarker_data_raw$originalData$GSE136651$expr <- log2(as.matrix(expr_data))
+blood_biomarker_data_raw$originalData$GSE136651$expr <- log2(as.matrix(expr_data) + 1)
 ```
 
 
 
 
-#### GSE120691 (Done)
+#### GSE120691
 ```{r}
 expr_data <- blood_biomarker_data_raw$originalData$GSE120691$expr
 expr_data$ensembl_transcript_id_version <- expr_data$Name
@@ -631,12 +631,12 @@ blood_biomarker_data_raw$originalData$GSE120691$keys <- rownames(expr_data)
 blood_biomarker_data_raw$originalData$GSE120691$key_comment <- "Keys manually loaded"
 
 # log transform the data since it is in TPM format
-blood_biomarker_data_raw$originalData$GSE120691$expr <- log2(as.matrix(expr_data))
+blood_biomarker_data_raw$originalData$GSE120691$expr <- log2(as.matrix(expr_data) + 1)
 ```
 
 
 
-#### GSE198048 (Done)
+#### GSE198048
 ```{r}
 expr_data <- blood_biomarker_data_raw$originalData$GSE198048$expr
 expr_data %<>% rownames_to_column(var="ensembl_gene_id") %>% left_join(ensembl_entrezgene_ensembl_gene_map %>% dplyr::select(ensembl_gene_id, external_gene_name), by=c("ensembl_gene_id"="ensembl_gene_id")) %>% filter(!is.na(external_gene_name)) %>% dplyr::select(-ensembl_gene_id) %>%
@@ -657,7 +657,7 @@ blood_biomarker_data_raw$originalData$GSE198048$expr <- as.matrix(expr_data)
 ```
 
 
-#### GSE138118 (Done)
+#### GSE138118
 
 Load the conversion table for the platform (GPL17692	[HuGene-2_1-st] Affymetrix Human Gene 2.1 ST Array [transcript (gene) version])
 ```{r}
@@ -701,7 +701,7 @@ blood_biomarker_data_raw$originalData$GSE138118$key_comment <- "Keys manually lo
 blood_biomarker_data_raw$originalData$GSE138118$expr <- as.matrix(expr_data)
 ```
 
-#### GSE74629 (Done)
+#### GSE74629 
 Tried loading the conversion table for the platform (	GPL10558	Illumina HumanHT-12 V4.0 expression beadchip) but got really weird data points (genes called "1-Mar" and "4-Mar" for example, which are clearly dates)
 
 
@@ -726,15 +726,13 @@ expr_data %<>% select(!!!syms(samples_in_metadata))
 blood_biomarker_data_raw$originalData$GSE74629$keys <- rownames(expr_data)
 blood_biomarker_data_raw$originalData$GSE74629$key_comment <- "Keys manually loaded"
 
-# According to GEO, the data was processed with neqc which outputs data in log2 format, so it is good to go
-# https://web.mit.edu/~r/current/arch/i386_linux26/lib/R/library/limma/html/nec.html
-
+# data was normalized using the neqc package which outputs in log2, doesn't need log transform.
 blood_biomarker_data_raw$originalData$GSE74629$expr <- as.matrix(expr_data)
 
 ```
 
 
-#### GSE125158 (In Progress)
+#### GSE125158
 
 Set up probe <-> gene map
 ```{r}
@@ -752,9 +750,13 @@ expr_data
 
 ```
 
+Remove Study (Values are normalized to GADPH by gene, not valid for this)
+```{r}
+blood_biomarker_data_raw$originalData$GSE125158 <- NULL
+```
 
 
-#### GSE20189 (TODO - switch to GPL571 instead of GPL570 for probe - gene matching, might get more genes)
+#### GSE20189
 ```{r}
 
 study <- blood_biomarker_data_raw$originalData$GSE20189
@@ -762,86 +764,245 @@ samples_in_metadata <- study$pheno %>% pull(geo_accession)
 expr_data <- as.data.frame(study$expr)
 
 expr_data %<>% rownames_to_column(var="affy_hg_u133_plus_2") %>% left_join(ensembl_entrezgene_ensembl_gene_map %>% dplyr::select(affy_hg_u133_plus_2, external_gene_name), by=c("affy_hg_u133_plus_2"="affy_hg_u133_plus_2")) %>% filter(!is.na(external_gene_name)) %>% dplyr::select(-affy_hg_u133_plus_2) %>%
-  mutate(across(-external_gene_name, as.numeric)) %>% group_by(external_gene_name) %>% summarise(across(where(is.numeric), mean, na.rm = TRUE)) %>% ungroup() %>% column_to_rownames(var="external_gene_name") 
+  mutate(across(-external_gene_name, as.numeric)) %>% group_by(external_gene_name) %>% summarise(across(where(is.numeric), mean, na.rm = TRUE)) %>% ungroup() %>% filter(external_gene_name != "")  %>% column_to_rownames(var="external_gene_name") 
 
-# remove NA first row
-expr_data %<>% slice(-1)
+# remove any samples that have been filtered out of the metadata
+samples_in_metadata <- blood_biomarker_data_raw$originalData$GSE20189$pheno %>% pull(geo_accession)
+expr_data %<>% select(!!!syms(samples_in_metadata))
 
-# remove samples not in the metadata
-
-# get the gene names
-gene_names <- rownames(expr_data)
-
-# rotate, the data, filter out samples that aren't
-expr_data <- as.data.frame(t(expr_data))
-expr_data %<>% rownames_to_column(var="sample_id") %>% filter(sample_id %in% samples_in_metadata) %>% column_to_rownames(var="sample_id")
-expr_data <- as.data.frame(t(expr_data))
+blood_biomarker_data_raw$originalData$GSE20189$keys <- rownames(expr_data)
+blood_biomarker_data_raw$originalData$GSE20189$key_comment <- "Keys manually loaded"
 
 # save to the dataset
+# doesn't need log transform "values are log scale RMA intensities"
 blood_biomarker_data_raw$originalData$GSE20189$expr <- as.matrix(expr_data)
-blood_biomarker_data_raw$originalData$GSE20189$keys <- gene_names
 ```
 
-```{r}
-blood_biomarker_data_raw$originalData$GSE20189$platform
-```
-
-
-```{r}
-checkDataObject(blood_biomarker_data_raw$originalData$GSE20189, "Dataset")
-```
 
 #### GSE16443
+- Platform: GPL2986	ABI Human Genome Survey Microarray Version 2
+- Data is log2 transformed
+
+Load the conversion table 
 ```{r}
-blood_biomarker_data_raw$originalData$GSE16443$expr
+GPL2986_conversion_table <- read_tsv("/Users/hansenhan/biomarkers/platform_conversion_tables/GPL2986.txt", skip = 17)
+GPL2986_conversion_table
+
+GPL2986_conversion_table$external_gene_name <- GPL2986_conversion_table$`Gene Symbol`
+GPL2986_conversion_table$probeset_id <-as.character(GPL2986_conversion_table$`ID`)
+GPL2986_conversion_table %<>% select(external_gene_name, probeset_id) %>% mutate(external_gene_name = ifelse(external_gene_name == "null", NA, external_gene_name))
+
+GPL2986_conversion_table
 ```
 
-#### GSE39345
 ```{r}
-blood_biomarker_data_raw$originalData$GSE39345$expr
+expr_data <- as.data.frame(blood_biomarker_data_raw$originalData$GSE16443$expr)
+expr_data %<>% rownames_to_column(var = "probeset_id") %>% left_join(GPL2986_conversion_table, by = c("probeset_id"="probeset_id")) %>% select(-probeset_id) %>%
+  mutate(across(-external_gene_name, as.numeric)) %>% group_by(external_gene_name) %>% summarise(across(where(is.numeric), mean, na.rm = TRUE)) %>% ungroup() %>% filter(external_gene_name != "") %>% column_to_rownames(var="external_gene_name") 
+expr_data
+
+
+# remove any samples that have been filtered out of the metadata
+samples_in_metadata <- blood_biomarker_data_raw$originalData$GSE16443$pheno %>% pull(geo_accession)
+expr_data %<>% select(!!!syms(samples_in_metadata))
+
+blood_biomarker_data_raw$originalData$GSE16443$keys <- rownames(expr_data)
+blood_biomarker_data_raw$originalData$GSE16443$key_comment <- "Keys manually loaded"
+
+# save to the dataset
+blood_biomarker_data_raw$originalData$GSE16443$expr <- as.matrix(expr_data)
+
 ```
 
-#### GSE164191 (Ready)
+
+#### GSE164191
 ```{r}
-study <- blood_biomarker_data_raw$originalData$GSE164191
-samples_in_metadata <- study$pheno %>% pull(geo_accession)
-expr_data <- as.data.frame(study$expr)
+expr_data <- as.data.frame(blood_biomarker_data_raw$originalData$GSE164191$expr)
 
 expr_data %<>% rownames_to_column(var="affy_hg_u133_plus_2") %>% left_join(ensembl_entrezgene_ensembl_gene_map %>% dplyr::select(affy_hg_u133_plus_2, external_gene_name), by=c("affy_hg_u133_plus_2"="affy_hg_u133_plus_2")) %>% filter(!is.na(external_gene_name)) %>% dplyr::select(-affy_hg_u133_plus_2) %>%
-  mutate(across(-external_gene_name, as.numeric)) %>% group_by(external_gene_name) %>% summarise(across(where(is.numeric), mean, na.rm = TRUE)) %>% ungroup() %>% column_to_rownames(var="external_gene_name") 
+  mutate(across(-external_gene_name, as.numeric)) %>% group_by(external_gene_name) %>% summarise(across(where(is.numeric), mean, na.rm = TRUE)) %>% ungroup() %>% filter(external_gene_name != "") %>% column_to_rownames(var="external_gene_name") 
 
-# remove NA first row
-expr_data %<>% slice(-1)
 
 # remove samples not in the metadata
+samples_in_metadata <- blood_biomarker_data_raw$originalData$GSE164191$pheno %>% pull(geo_accession)
+expr_data %<>% select(!!!syms(samples_in_metadata))
 
-# get the gene names
-gene_names <- rownames(expr_data)
-
-# rotate, the data, filter out samples that aren't
-expr_data <- as.data.frame(t(expr_data))
-expr_data %<>% rownames_to_column(var="sample_id") %>% filter(sample_id %in% samples_in_metadata) %>% column_to_rownames(var="sample_id")
-expr_data <- as.data.frame(t(expr_data))
 
 # save to the dataset
 blood_biomarker_data_raw$originalData$GSE164191$expr <- as.matrix(expr_data)
 blood_biomarker_data_raw$originalData$GSE164191$keys <- gene_names
+blood_biomarker_data_raw$originalData$GSE164191$key_comment <- "Keys manually loaded"
+
 ```
 
-
-## Calculations
-
+#### GSE39345
+- Data was quantile normalized
 ```{r}
-for (study in blood_biomarker_data_raw$originalData) {
-    print(study$platform)
-}
+expr_data <- as.data.frame(blood_biomarker_data_raw$originalData$GSE39345$expr)
+expr_data %<>% rownames_to_column(var = "probeset_id") %>% left_join(ilm_gene_map, by = c("probeset_id"="probeset_id")) %>% select(-probeset_id) %>%
+  mutate(across(-external_gene_name, as.numeric)) %>% group_by(external_gene_name) %>% summarise(across(where(is.numeric), mean, na.rm = TRUE)) %>% ungroup() %>% filter(external_gene_name != "") %>% column_to_rownames(var="external_gene_name") 
+
+
+# remove any samples that have been filtered out of the metadata
+samples_in_metadata <- blood_biomarker_data_raw$originalData$GSE39345$pheno %>% pull(geo_accession)
+expr_data %<>% select(!!!syms(samples_in_metadata))
+
+# set keys
+blood_biomarker_data_raw$originalData$GSE39345$keys <- rownames(expr_data)
+blood_biomarker_data_raw$originalData$GSE39345$key_comment <- "Keys manually loaded"
+
+# log2 transform the data 
+blood_biomarker_data_raw$originalData$GSE39345$expr <- log2(as.matrix(expr_data) + 1)
+
+```
+
+#### GSE49515
+```{r}
+expr_data <- as.data.frame(blood_biomarker_data_raw$originalData$GSE49515$expr)
+
+expr_data %<>% rownames_to_column(var="affy_hg_u133_plus_2") %>% left_join(ensembl_entrezgene_ensembl_gene_map %>% dplyr::select(affy_hg_u133_plus_2, external_gene_name), by=c("affy_hg_u133_plus_2"="affy_hg_u133_plus_2")) %>% filter(!is.na(external_gene_name)) %>% dplyr::select(-affy_hg_u133_plus_2) %>%
+  mutate(across(-external_gene_name, as.numeric)) %>% group_by(external_gene_name) %>% summarise(across(where(is.numeric), mean, na.rm = TRUE)) %>% ungroup() %>% filter(external_gene_name != "") %>% column_to_rownames(var="external_gene_name") 
+
+
+# remove samples not in the metadata
+samples_in_metadata <- blood_biomarker_data_raw$originalData$GSE49515$pheno %>% pull(geo_accession)
+expr_data %<>% select(!!!syms(samples_in_metadata))
+
+
+# save to the dataset
+blood_biomarker_data_raw$originalData$GSE49515$expr <- as.matrix(expr_data)
+blood_biomarker_data_raw$originalData$GSE49515$keys <- gene_names
+blood_biomarker_data_raw$originalData$GSE49515$key_comment <- "Keys manually loaded"
+```
+
+#### GSE27562
+```{r}
+expr_data <- as.data.frame(blood_biomarker_data_raw$originalData$GSE27562$expr)
+
+expr_data %<>% rownames_to_column(var="affy_hg_u133_plus_2") %>% left_join(ensembl_entrezgene_ensembl_gene_map %>% dplyr::select(affy_hg_u133_plus_2, external_gene_name), by=c("affy_hg_u133_plus_2"="affy_hg_u133_plus_2")) %>% filter(!is.na(external_gene_name)) %>% dplyr::select(-affy_hg_u133_plus_2) %>%
+  mutate(across(-external_gene_name, as.numeric)) %>% group_by(external_gene_name) %>% summarise(across(where(is.numeric), mean, na.rm = TRUE)) %>% ungroup() %>% filter(external_gene_name != "") %>% column_to_rownames(var="external_gene_name") 
+
+
+# remove samples not in the metadata
+samples_in_metadata <- blood_biomarker_data_raw$originalData$GSE27562$pheno %>% pull(geo_accession)
+expr_data %<>% select(!!!syms(samples_in_metadata))
+
+
+# save to the dataset
+blood_biomarker_data_raw$originalData$GSE27562$expr <- as.matrix(expr_data)
+blood_biomarker_data_raw$originalData$GSE27562$keys <- gene_names
+blood_biomarker_data_raw$originalData$GSE27562$key_comment <- "Keys manually loaded"
+```
+
+#### GSE10715
+```{r}
+expr_data <- as.data.frame(blood_biomarker_data_raw$originalData$GSE10715$expr)
+
+expr_data %<>% rownames_to_column(var="affy_hg_u133_plus_2") %>% left_join(ensembl_entrezgene_ensembl_gene_map %>% dplyr::select(affy_hg_u133_plus_2, external_gene_name), by=c("affy_hg_u133_plus_2"="affy_hg_u133_plus_2")) %>% filter(!is.na(external_gene_name)) %>% dplyr::select(-affy_hg_u133_plus_2) %>%
+  mutate(across(-external_gene_name, as.numeric)) %>% group_by(external_gene_name) %>% summarise(across(where(is.numeric), mean, na.rm = TRUE)) %>% ungroup() %>% filter(external_gene_name != "") %>% column_to_rownames(var="external_gene_name") 
+
+
+# remove samples not in the metadata
+samples_in_metadata <- blood_biomarker_data_raw$originalData$GSE10715$pheno %>% pull(geo_accession)
+expr_data %<>% select(!!!syms(samples_in_metadata))
+
+
+# save to the dataset
+blood_biomarker_data_raw$originalData$GSE10715$expr <- as.matrix(expr_data)
+blood_biomarker_data_raw$originalData$GSE10715$keys <- gene_names
+blood_biomarker_data_raw$originalData$GSE10715$key_comment <- "Keys manually loaded"
 ```
 
 
+## Check Dataset
 
 ```{r}
 checkDataObject(blood_biomarker_data_raw, "Meta", "Pre-Analysis")
 ```
 
+## Split into Test & Train
 
+Split 
+```{r}
+# Set seed for reproducibility
+set.seed(123)
+
+study_ids <- c(
+  "GSE198048",
+  "GSE138118",
+  "GSE136651",
+  "GSE74629",
+  "GSE20189",
+  "GSE16443",
+  "GSE39345",
+  "GSE120691",
+  "GSE164191",
+  "GSE49515",
+  "GSE27562",
+  "GSE10715"
+)
+
+# Shuffle the list
+shuffled_ids <- sample(study_ids)
+
+# Split into train and test sets
+train_ids <- shuffled_ids[1:(length(shuffled_ids) / 2)]
+test_ids <- shuffled_ids[(length(shuffled_ids) / 2 + 1):length(shuffled_ids)]
+
+# Print the results
+cat("Train IDs:\n")
+print(train_ids)
+cat("\nTest IDs:\n")
+print(test_ids)
+```
+
+Format datasets
+```{r}
+# remove train datasets from test data and vice versa
+test_data <- blood_biomarker_data_raw
+for (study_to_delete in train_ids) {
+  test_data$originalData[[study_to_delete]] <- NULL
+}
+
+train_data <- blood_biomarker_data_raw
+for (study_to_delete in test_ids) {
+  train_data$originalData[[study_to_delete]] <- NULL
+}
+
+```
+
+## Meta Analysis
+
+### Calculate Effect Sizes
+```{r}
+meta_results <- runMetaAnalysis(train_data, runLeaveOneOutAnalysis= TRUE, maxCores=Inf)
+```
+
+### Identify Gene Signature
+Here, we look for a gene signature with an effect size > 1, significance of =< 0.05 and must be present in at least half the studies (3)
+```{r}
+meta_results <- filterGenes(meta_results, isLeaveOneOut = FALSE, effectSizeThresh = 1, FDRThresh = 0.05, numberStudiesThresh = 3)
+```
+
+View gene signature
+```{r}
+meta_results$filterResults[[1]]
+```
+
+```{r}
+heatmapPlot(metaObject = meta_results, filterObject = meta_results$filterResults[[1]])
+```
+
+
+### Test Accuracy
+
+Performance on discovery data is varied but overall 0.9 AUC
+```{r}
+summaryROCPlot(metaObject = meta_results, filterObject = meta_results$filterResults[[1]], bootstrapReps = 100)
+```
+
+Performance on validation data breaks down with a summary AUC of 0.55
+```{r}
+summaryROCPlot(metaObject = test_data, filterObject = meta_results$filterResults[[1]], bootstrapReps = 100)
+```
 
