@@ -607,7 +607,7 @@ blood_biomarker_data_raw$originalData$GSE136651$keys <- rownames(expr_data)
 blood_biomarker_data_raw$originalData$GSE136651$key_comment <- "Keys manually loaded"
 
 # log transform the data since it is in TPM format 
-blood_biomarker_data_raw$originalData$GSE136651$expr <- log2(as.matrix(expr_data) + 1)
+blood_biomarker_data_raw$originalData$GSE136651$expr <- log10(as.matrix(expr_data) + 1)
 ```
 
 
@@ -933,7 +933,6 @@ study_ids <- c(
   "GSE136651",
   "GSE74629",
   "GSE20189",
-  "GSE16443",
   "GSE39345",
   "GSE120691",
   "GSE164191",
@@ -946,8 +945,9 @@ study_ids <- c(
 shuffled_ids <- sample(study_ids)
 
 # Split into train and test sets
-train_ids <- shuffled_ids[1:(length(shuffled_ids) / 2)]
-test_ids <- shuffled_ids[(length(shuffled_ids) / 2 + 1):length(shuffled_ids)]
+train_ids <- shuffled_ids[1:6]
+test_ids <- shuffled_ids[7:11]
+test_ids <- c(test_ids, "GSE16443") # add this one in there no matter what since it only has 6k probes
 
 # Print the results
 cat("Train IDs:\n")
@@ -979,9 +979,9 @@ meta_results <- runMetaAnalysis(train_data, runLeaveOneOutAnalysis= TRUE, maxCor
 ```
 
 ### Identify Gene Signature
-Here, we look for a gene signature with an effect size > 1, significance of =< 0.05 and must be present in at least half the studies (3)
+Here, we look for a gene signature with an effect size > 1, significance of =< 0.05
 ```{r}
-meta_results <- filterGenes(meta_results, isLeaveOneOut = FALSE, effectSizeThresh = 1, FDRThresh = 0.05, numberStudiesThresh = 3)
+meta_results <- filterGenes(meta_results, isLeaveOneOut = FALSE, effectSizeThresh = 1, FDRThresh = 0.05)
 ```
 
 View gene signature
@@ -996,7 +996,7 @@ heatmapPlot(metaObject = meta_results, filterObject = meta_results$filterResults
 
 ### Test Accuracy
 
-Performance on discovery data is varied but overall 0.9 AUC
+Performance on discovery data is varied but overall 0.87 AUC
 ```{r}
 summaryROCPlot(metaObject = meta_results, filterObject = meta_results$filterResults[[1]], bootstrapReps = 100)
 ```
