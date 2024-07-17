@@ -46,7 +46,7 @@ To explore the diagnostic power of the gene signature classifying cancer and hea
 ## Conclusions & Future Work
 Unfortunately, since the identified 224-gene cancer blood signature does not generalize well to independent validation datasets, its current utility is limited. As more studies are published, perhaps in the future, further refinement and validation with larger and more varied datasets may be possible to identify robust biomarkers of cancer in blood samples. These in turn may be used for diagnostic purposes or in identifying potential drug targets. 
 
-While I considered additional analysis such as enrichment analysis of the gene signature and exploring additional expression data from other sample types, such as isolated neutrophils, CD4 cells, and CD8 cells, etc. However, given the discouraging findings in the validation studies, I ultimately decided to move on to other projects.
+While I considered additional analysis such as enrichment analysis of the gene signature and exploring additional expression data from other studies with different sample types (ie. isolated neutrophils, CD4 cells, and CD8 cells, etc), given the discouraging findings in the validation studies, I ultimately decided to pause work and move on to other projects.
 
-Additionally, by sharing this project publicly, I hope it can serve as a valuable reference for similar future work.
+By sharing this project publicly, I hope it can serve as a valuable reference for similar future work.
 
