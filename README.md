@@ -1,5 +1,7 @@
 # Identifying Cancer Blood Biomarkers
-This project focuses on the identification of blood biomarkers for cancer through a comprehensive meta-analysis of publicly available gene expression datasets. The repository contains essential scripts and data necessary for downloading, pre-processing, and analyzing gene expression data to uncover potential biomarkers that can be used to distinguish between cancerous and healthy samples and/or be used as potential drug targets.    
+This project focuses on the identification of blood biomarkers for cancer through a comprehensive meta-analysis of publicly available gene expression datasets. A meta-analysis is useful in this context by combining data from multiple studies, thereby increasing the statistical power and robustness of the findings. 
+
+The repository contains essential scripts and data necessary for downloading, pre-processing, and analyzing gene expression data to uncover potential biomarkers that can be used to distinguish between cancerous and healthy samples and/or be used as potential drug targets. By sharing this project publicly, I hope it can serve as a valuable reference for similar future work.
 
 
 ## Repository Contents
